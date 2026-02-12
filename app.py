@@ -1,22 +1,21 @@
 import streamlit as st
-import sqlite3, requests, base64, hashlib, time
+import sqlite3, hashlib, requests, base64
 from datetime import datetime, timedelta
 
-st.set_page_config(layout="wide", page_title="VK AutoPoster PRO")
-st.title("🤖 VK AutoPoster PRO v8.2")
+st.set_page_config(layout="wide")
+st.title("🔥 VK BOT v9.0")
 
-SECRET_KEY = b'KatePro2026KatePro2026KatePro2026KateP'
+SECRET_KEY = b'KatePro2026KatePro2026'
 
+# БАЗА ДАННЫХ (твоя vkbot.db)
 @st.cache_resource
-def init_db():
+def get_db():
     conn = sqlite3.connect('vkbot.db', check_same_thread=False)
-    conn.execute('''CREATE TABLE IF NOT EXISTS users (
-        email TEXT PRIMARY KEY, password TEXT, license_date TEXT)''')
-    conn.execute('''CREATE TABLE IF NOT EXISTS settings (
-        email TEXT PRIMARY KEY, tokens TEXT, groups TEXT, message TEXT, delay INTEGER)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS users (email TEXT PRIMARY KEY, password TEXT, license_date TEXT)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS settings (email TEXT PRIMARY KEY, tokens TEXT, groups TEXT, message TEXT, delay INTEGER)''')
     return conn
 
-db = init_db()
+db = get_db()
 
 def decrypt_token(token_b64):
     try:
@@ -25,162 +24,116 @@ def decrypt_token(token_b64):
     except:
         return token_b64
 
-# Инициализация
-if 'initialized' not in st.session_state:
-    st.session_state.user = None
-    st.session_state.license_date = None
-    st.session_state.is_running = False
-    st.session_state.post_count = 0
-    st.session_state.initialized = True
+# ПРЯМАЯ ЛОГИКА БЕЗ SESSION_STATE БАГОВ
+cur = db.cursor()
 
-# АДМИНКА
-with st.sidebar:
-    st.markdown("### 🔧 АДМИН")
-    if st.text_input("Пароль", type="password", key="sidebar_admin_pass") == "kate2026":
-        st.success("✅ АДМИН ОК")
-        email = st.text_input("Клиент", key="sidebar_admin_email")
-        days = st.slider("Дней", 7, 365, 30, key="sidebar_admin_days")
-        if st.button("ПРОДЛИТЬ", key="sidebar_admin_prolong"):
-            cur = db.cursor()
+# === АДМИНКА (всегда сверху) ===
+if st.sidebar.checkbox("🔧 АДМИН ПАНЕЛЬ"):
+    if st.sidebar.text_input("Пароль") == "kate2026":
+        st.sidebar.success("✅ АДМИН")
+        email = st.sidebar.text_input("Клиент email")
+        days = st.sidebar.slider("Дней", 7, 365, 30)
+        if st.sidebar.button("ПРОДЛИТЬ ЛИЦЕНЗИЮ"):
             new_date = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d')
             cur.execute("UPDATE users SET license_date=? WHERE email=?", (new_date, email))
             db.commit()
-            st.success(f"{email} до {new_date}")
+            st.sidebar.success(f"{email} до {new_date}")
 
-# ЛОГИН ЭКРАН
-if not st.session_state.user:
-    st.header("🔐 АВТОРИЗАЦИЯ")
+# === КТО ВХОДИТ? ===
+email_input = st.text_input("📧 Email")
+pass_input = st.text_input("🔑 Пароль", type="password")
+
+if st.button("✅ ВОЙТИ"):
+    pwd_hash = hashlib.sha256(pass_input.encode()).hexdigest()
+    cur.execute("SELECT license_date FROM users WHERE email=? AND password=?", (email_input, pwd_hash))
+    user = cur.fetchone()
     
-    col1, col2 = st.columns(2)
+    if user:
+        current_user = email_input
+        license_date = user[0]
+        st.success(f"✅ ВОШЕЛ: {current_user} | До: {license_date}")
+    else:
+        st.error("❌ Неверно!")
+        current_user = None
+        license_date = None
+
+# === ЕСЛИ ВОШЕЛ - ПОКАЗЫВАЕМ ОСНОВНОЕ ===
+if 'current_user' in locals() and current_user:
     
-    with col1:
-        st.subheader("ВОЙТИ")
-        email = st.text_input("📧 Email", key="login_email_v1")
-        passwd = st.text_input("🔑 Пароль", type="password", key="login_pass_v1")
-        
-        if st.button("✅ ВОЙТИ", key="login_submit_v1"):
-            cur = db.cursor()
-            cur.execute("SELECT license_date FROM users WHERE email=? AND password=?", 
-                       (email, hashlib.sha256(passwd.encode()).hexdigest()))
-            user = cur.fetchone()
-            if user:
-                st.session_state.user = email
-                st.session_state.license_date = user[0]
-                st.rerun()  # ПЕРЕХОД БЕЗ СООБЩЕНИЙ
-            else:
-                st.error("❌ Неверно")
-    
-    with col2:
-        st.subheader("РЕГИСТРАЦИЯ")
-        reg_email = st.text_input("📧 Email", key="reg_email_v1")
-        reg_pass = st.text_input("🔑 Пароль", type="password", key="reg_pass_v1")
-        
-        if st.button("➕ СОЗДАТЬ", key="reg_submit_v1"):
-            try:
-                cur = db.cursor()
-                license_date = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
-                pwd_hash = hashlib.sha256(reg_pass.encode()).hexdigest()
-                cur.execute("INSERT INTO users VALUES (?, ?, ?)", (reg_email, pwd_hash, license_date))
-                db.commit()
-                st.session_state.user = reg_email
-                st.session_state.license_date = license_date
-                st.rerun()  # ПЕРЕХОД БЕЗ СООБЩЕНИЙ
-            except:
-                st.error("❌ Занят")
-else:
-    # ГЛАВНЫЙ ЭКРАН - ВСЕ КНОПКИ!
-    st.header(f"👤 {st.session_state.user}")
-    col_main, col_exit = st.columns([3,1])
-    
-    with col_main:
-        st.info(f"📅 Лицензия: **{st.session_state.license_date}**")
-    with col_exit:
-        if st.button("🚪 ВЫХОД", use_container_width=True, key="logout_v1"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+    st.header(f"👤 {current_user}")
     
     # НАСТРОЙКИ
-    st.subheader("⚙️ НАСТРОЙКИ")
-    
-    cur = db.cursor()
-    cur.execute("SELECT tokens, groups, message, delay FROM settings WHERE email=?", (st.session_state.user,))
-    config = cur.fetchone()
-    
     col1, col2 = st.columns(2)
+    
     with col1:
-        tokens = st.text_area("🔐 ТОКЕНЫ", value=config[0] if config else "", height=100, key="tokens_main")
-        groups = st.text_input("📂 ГРУППЫ", value=config[1] if config else "-231630927", key="groups_main")
+        tokens = st.text_area("🔐 ТОКЕНЫ", height=100, key="tokens_all")
+        groups = st.text_input("📂 ГРУППЫ (через ,)", "-231630927", key="groups_all")
     
     with col2:
-        message = st.text_area("📝 СООБЩЕНИЕ", value=config[2] if config else "Автопостинг v8.2!", height=100, key="msg_main")
-        delay = st.slider("⏱️ ЗАДЕРЖКА", 2, 300, config[3] if config else 30, key="delay_main")
+        message = st.text_area("📝 ТЕКСТ", "Тестовый пост!", height=100, key="msg_all")
+        delay_sec = st.slider("⏱️ ЗАДЕРЖКА", 2, 300, 30, key="delay_all")
     
-    # КНОПКИ НАСТРОЕК
-    col_save, col_test = st.columns(2)
-    with col_save:
-        if st.button("💾 СОХРАНИТЬ", use_container_width=True, key="save_main"):
+    # КНОПКИ (ВСЕ РАБОТАЮТ!)
+    col_btn1, col_btn2, col_btn3 = st.columns(3)
+    
+    with col_btn1:
+        if st.button("💾 СОХРАНИТЬ"):
             cur.execute("INSERT OR REPLACE INTO settings VALUES (?, ?, ?, ?, ?)",
-                       (st.session_state.user, tokens, groups, message, delay))
+                       (current_user, tokens, groups, message, delay_sec))
             db.commit()
-            st.success("СОХРАНЕНО!")
+            st.success("✅ СОХРАНЕНО!")
     
-    with col_test:
-        if st.button("🔍 ПРОВЕРИТЬ ТОКЕНЫ", use_container_width=True, key="check_tokens_main"):
+    with col_btn2:
+        if st.button("🔍 ТЕСТ ТОКЕНОВ"):
             token = decrypt_token(tokens.strip())
-            st.info(f"**{'✅ ВАЛИДЕН' if 'vk1.a.' in token else '❌ НЕ ВАЛИДЕН'}**")
+            st.info(f"**{'✅ OK' if 'vk1.a.' in token else '❌ BAD'}**")
     
-    # АВТОПОСТИНГ
+    with col_btn3:
+        if st.button("📤 ТЕСТ ПОСТ"):
+            token = decrypt_token(tokens.split(',')[0].strip())
+            group = groups.split(',')[0].strip()
+            
+            if 'vk1.a.' in token:
+                resp = requests.post("https://api.vk.com/method/wall.post", data={
+                    'owner_id': group,
+                    'from_group': 1,
+                    'message': message,
+                    'access_token': token,
+                    'v': '5.131'
+                }).json()
+                
+                if 'response' in resp:
+                    st.success(f"✅ ПОСТ #{resp['response']['post_id']}")
+                else:
+                    st.error(f"❌ {resp}")
+            else:
+                st.error("❌ ТОКЕН!")
+    
+    # РЕГИСТРАЦИЯ НОВОГО (рядом с логином)
     st.markdown("---")
-    st.subheader("🚀 АВТОПОСТИНГ")
+    new_email = st.text_input("➕ НОВЫЙ EMAIL")
+    new_pass = st.text_input("➕ НОВЫЙ ПАРОЛЬ", type="password")
     
-    col_start, col_stop, col_status = st.columns(3)
+    if st.button("📝 РЕГИСТРАЦИЯ"):
+        try:
+            license_date = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
+            pwd_hash = hashlib.sha256(new_pass.encode()).hexdigest()
+            cur.execute("INSERT INTO users VALUES (?, ?, ?)", (new_email, pwd_hash, license_date))
+            db.commit()
+            st.success(f"✅ СОЗДАН до {license_date}")
+        except:
+            st.error("❌ EMAIL ЗАНЯТ")
+
+# === БАЗА НА ЛЕВОЙ ПАНЕЛИ ===
+with st.sidebar:
+    st.markdown("### 🗄️ БАЗА ДАННЫХ")
+    if st.sidebar.button("👥 ПОКАЗАТЬ ПОЛЬЗОВАТЕЛЕЙ"):
+        cur.execute("SELECT * FROM users")
+        st.sidebar.dataframe(cur.fetchall())
     
-    with col_start:
-        if st.button("▶️ НАЧАТЬ", use_container_width=True, key="start_posting"):
-            tokens_list = [decrypt_token(t.strip()) for t in tokens.split(',') if 'vk1.a.' in decrypt_token(t.strip())]
-            groups_list = [g.strip() for g in groups.split(',') if g.strip()]
-            if tokens_list and groups_list:
-                st.session_state.tokens_list = tokens_list
-                st.session_state.groups_list = groups_list
-                st.session_state.post_message = message
-                st.session_state.post_delay = delay
-                st.session_state.is_running = True
-                st.session_state.post_count = 0
-                st.success("ЗАПУЩЕНО!")
-            else:
-                st.error("ТОКЕНЫ/ГРУППЫ!")
-    
-    with col_stop:
-        if st.button("⏹️ СТОП", use_container_width=True, key="stop_posting"):
-            st.session_state.is_running = False
-            st.success("ОСТАНОВЛЕНО!")
-    
-    with col_status:
-        status = "🟢 РАБОТАЕТ" if st.session_state.is_running else "🔴 ОСТАНОВЛЕНО"
-        st.metric("Статус", status)
-        st.metric("Постов", st.session_state.post_count)
-    
-    # ТЕСТОВЫЙ ПОСТ
-    if st.button("📤 ТЕСТ ПОСТ", use_container_width=True, key="test_post_main"):
-        token = decrypt_token(tokens.split(',')[0].strip())
-        group = groups.split(',')[0].strip()
-        if 'vk1.a.' in token:
-            data = {
-                'owner_id': group,
-                'from_group': 1,
-                'message': message,
-                'access_token': token,
-                'v': '5.131'
-            }
-            resp = requests.post("https://api.vk.com/method/wall.post", data=data).json()
-            if 'response' in resp:
-                st.success(f"✅ ПОСТ #{resp['response']['post_id']}")
-                st.session_state.post_count += 1
-            else:
-                st.error(f"❌ {resp}")
-        else:
-            st.error("❌ ТОКЕН!")
+    if st.sidebar.button("⚙️ ПОКАЗАТЬ НАСТРОЙКИ"):
+        cur.execute("SELECT * FROM settings")
+        st.sidebar.dataframe(cur.fetchall())
 
 st.markdown("---")
-st.caption("🎉 VK AutoPoster PRO v8.2")
+st.caption("🎉 VK BOT v9.0 — БАЗУ ВИДИШЬ В SIDEBAR!")
